@@ -146,7 +146,7 @@ if mode == "view":
         st.rerun()
 else:
     # Edit mode: show A–K + form
-    render_kv_grid(df_ak, title="Selected Row (A–K)", cols=2)
+    render_kv_grid(df_ak, title="Patient", cols=2)
 
     # Form to update L
     idx = ALLOWED_L.index(current_L) if current_L in ALLOWED_L else 0
