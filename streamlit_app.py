@@ -1,11 +1,16 @@
-# Streamlit Row-by-Row Dashboard for Google Sheets (User-Ready)
+# Streamlit Row-by-Row Dashboard with Lock Mode
 # ------------------------------------------------
-# This version is preconfigured to your Google Sheet as the default data source.
-# You can still override by adding ?sheet=<CSV_URL> in the URL.
+# Features:
+# - View one row at a time from a Google Sheet (CSV export)
+# - URL params: ?row=, ?id=&id_col=
+# - NEW: Locked mode via ?lock=1 => hides sidebar & navigation; shows only the specified row
+# - Default dataset = your Google Sheet; override with ?sheet= (disabled in lock mode)
+# - Download selected row as JSON/CSV (optional; kept in both modes)
 #
-# URL Examples:
-# - By row number:   ?row=1
-# - By key column:   ?id=ABC123&id_col=PatientID
+# Examples:
+#   - Normal view (navigable):             ?row=5
+#   - Locked single-row view (shareable):  ?row=5&lock=1
+#   - Locked by key:                       ?id=ABC123&id_col=PatientID&lock=1
 #
 # Tip: Share your Google Sheet as "Anyone with the link → Viewer"
 
@@ -59,37 +64,62 @@ def load_csv(url: str) -> pd.DataFrame:
     return df
 
 
-st.set_page_config(page_title="Row Dashboard", layout="wide")
+# Page config first (we may collapse sidebar if locked)
+q_pre = get_query_params()
+LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
+st.set_page_config(page_title="Row Dashboard", layout="wide", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
 st.title("🔎 Row-by-Row Dashboard (Google Sheet)")
 
-q = get_query_params()
+
+q = q_pre
 
 # Default to the user's sheet unless overridden via ?sheet= or ?sheet_id=&gid=
 DEFAULT_SHEET = "https://docs.google.com/spreadsheets/d/1oaQZ6OwxJUti4AIf620Hp_bCjmKwu8AF9jYTv4vs7Hc/export?format=csv&gid=0"
 
-sheet = q.get("sheet") or DEFAULT_SHEET
+# In locked mode, ignore any external sheet overrides for safety
+if LOCKED:
+    sheet = DEFAULT_SHEET
+else:
+    sheet = q.get("sheet") or DEFAULT_SHEET
+
 sheet_id = q.get("sheet_id")
 gid = q.get("gid")
 
-if not q.get("sheet") and sheet_id:
+if not LOCKED and (not q.get("sheet") and sheet_id):
     gid_val = gid if gid is not None else "0"
     sheet = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid_val}"
 
-with st.sidebar:
-    st.subheader("Data Source")
-    csv_url = st.text_input(
-        "Public Google Sheet CSV URL",
-        value=sheet or "",
-        placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=0",
-        help=(
-            "Use the Google Sheet CSV export URL. Your sheet must be shared as 'Anyone with the link (Viewer)'.\n"
-            "You can also specify ?sheet_id=...&gid=... in the URL instead of pasting here."
-        ),
-    )
-    st.caption("Tip: The app can also open a row by key via ?id= and ?id_col=")
+# Sidebar: hidden when LOCKED (collapsed + CSS)
+if not LOCKED:
+    with st.sidebar:
+        st.subheader("Data Source")
+        csv_url = st.text_input(
+            "Public Google Sheet CSV URL",
+            value=sheet or "",
+            placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=0",
+            help=(
+                "Use the Google Sheet CSV export URL. Your sheet must be shared as 'Anyone with the link (Viewer)'.\n"
+                "You can also specify ?sheet_id=...&gid=... in the URL instead of pasting here."
+            ),
+        )
+        st.caption("Tip: The app can also open a row by key via ?id= and ?id_col=")
+else:
+    # Hide sidebar toggle completely
+    st.markdown(
+        """
 
+        <style>
+        [data-testid="stSidebar"] {display: none !important;}
+        [data-testid="collapsedControl"] {display: none !important;}
+        </style>
+        """
+        , unsafe_allow_html=True
+    )
+    csv_url = sheet
+
+# Load data
 try:
-    df = load_csv(csv_url) if csv_url else load_csv(DEFAULT_SHEET)
+    df = load_csv(csv_url) if csv_url else load_csv(sheet)
 except Exception as e:
     st.error(f"โหลดข้อมูลจาก CSV ไม่สำเร็จ: {e}")
     st.stop()
@@ -98,6 +128,7 @@ if df.empty:
     st.warning("ตารางว่าง (No data rows). Please check your sheet.")
     st.stop()
 
+# Resolve target row
 row_param = coerce_int(q.get("row"), default=None)
 id_value = q.get("id")
 id_col = q.get("id_col")
@@ -112,23 +143,15 @@ elif row_param is not None:
     base = min(base, len(df))
     selected_idx = base - 1
 else:
+    if LOCKED:
+        st.error("Locked mode ต้องระบุพารามิเตอร์ ?row= หรือ ?id= & id_col=")
+        st.stop()
     selected_idx = 0
 
 selected_idx = max(0, min(selected_idx, len(df) - 1))
 row = df.iloc[selected_idx]
 
-def make_link(**updates):
-    keep = {"sheet": None, "sheet_id": None, "gid": None, "id": None, "id_col": None}
-    for k in list(keep.keys()):
-        if q.get(k):
-            keep[k] = q.get(k)
-    # ensure we always keep the DEFAULT_SHEET if nothing provided
-    if not keep.get("sheet") and not keep.get("sheet_id"):
-        keep["sheet"] = DEFAULT_SHEET
-    keep.update(updates)
-    keep = {k: v for k, v in keep.items() if v is not None}
-    return "?" + urlencode(keep)
-
+# Header metrics
 left, mid, right = st.columns([1, 1, 2])
 with left:
     st.metric("Total Rows", len(df))
@@ -138,23 +161,32 @@ with right:
     if id_col and id_col in df.columns:
         st.metric("Key", f"{id_col} = {row.get(id_col)}")
 
-c1, c2, c3, c4 = st.columns([1, 1, 2, 3])
-with c1:
-    prev_idx = max(0, selected_idx - 1)
-    st.link_button("⬅️ Previous", make_link(row=prev_idx + 1), use_container_width=True)
-with c2:
-    next_idx = min(len(df) - 1, selected_idx + 1)
-    st.link_button("Next ➡️", make_link(row=next_idx + 1), use_container_width=True)
-with c3:
-    st.write("")
-with c4:
-    st.caption("Permalink to this row:")
-    st.code(make_link(row=selected_idx + 1), language="text")
+# Navigation controls (hidden in LOCKED mode)
+if not LOCKED:
+    c1, c2, c3, c4 = st.columns([1, 1, 2, 3])
+    with c1:
+        prev_idx = max(0, selected_idx - 1)
+        st.link_button("⬅️ Previous", "?" + urlencode({**{k:v for k,v in q.items() if k!='row'}, **{'row': prev_idx + 1}}), use_container_width=True)
+    with c2:
+        next_idx = min(len(df) - 1, selected_idx + 1)
+        st.link_button("Next ➡️", "?" + urlencode({**{k:v for k,v in q.items() if k!='row'}, **{'row': next_idx + 1}}), use_container_width=True)
+    with c3:
+        st.write("")
+    with c4:
+        st.caption("Permalink to this row:")
+        st.code("?" + urlencode({**{k:v for k,v in q.items() if k!='row'}, **{'row': selected_idx + 1}}), language="text")
+else:
+    st.caption("🔒 Locked single-row view")
 
+st.divider()
+
+# Determine display types
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 image_like_cols = [c for c in df.columns if df[c].astype(str).map(looks_like_image_url).any()]
 
+# Layout
 left_col, right_col = st.columns([2, 1])
+
 with left_col:
     st.subheader("Row Details")
     if numeric_cols:
@@ -165,15 +197,17 @@ with left_col:
                 if pd.isna(val):
                     display = "-"
                 else:
-                    display = f"{val:,.0f}" if float(val).is_integer() else f"{val:,.2f}"
+                    try:
+                        display = f"{val:,.0f}" if float(val).is_integer() else f"{val:,.2f}"
+                    except Exception:
+                        display = str(val)
                 st.metric(col, display)
 
-    shown_image = False
+    # Image preview (first image-like column)
     for col in image_like_cols:
         val = str(row[col])
         if looks_like_image_url(val):
             st.image(val, caption=col, use_container_width=True)
-            shown_image = True
             break
 
     st.dataframe(row.to_frame().T, use_container_width=True)
@@ -190,38 +224,37 @@ with right_col:
     row.to_frame().T.to_csv(csv_buf, index=False)
     st.download_button("Download CSV", data=csv_buf.getvalue().encode("utf-8"), file_name=f"row_{selected_idx+1}.csv", mime="text/csv")
 
-    st.caption("Jump to row…")
-    jump_to = st.number_input("Row #", min_value=1, max_value=len(df), value=selected_idx + 1, step=1)
-    st.link_button("Go", make_link(row=int(jump_to)), use_container_width=True)
+    if not LOCKED:
+        st.caption("Jump to row…")
+        jump_to = st.number_input("Row #", min_value=1, max_value=len(df), value=selected_idx + 1, step=1)
+        new_q = {**{k:v for k,v in q.items() if k!='row'}, **{'row': int(jump_to)}}
+        st.link_button("Go", "?" + urlencode(new_q), use_container_width=True)
 
-    st.caption("Find by ID (if your sheet has an ID column)")
-    id_col_input = st.selectbox("ID Column", options=list(df.columns), index=0 if id_col in df.columns else 0, key="idcol")
-    id_val_input = st.text_input("ID Value", value=str(row.get(id_col)) if id_col and id_col in df.columns else "")
-    if st.button("Open by ID", use_container_width=True):
-        params = get_query_params()
-        params.pop("row", None)
-        set_query_params(**{**params, "id": id_val_input, "id_col": id_col_input})
-        st.rerun()
+        st.caption("Find by ID (if your sheet has an ID column)")
+        id_col_input = st.selectbox("ID Column", options=list(df.columns), index=0 if (q.get('id_col') in df.columns if hasattr(df.columns, '__contains__') else False) else 0, key="idcol")
+        id_val_input = st.text_input("ID Value", value=str(row.get(q.get('id_col'))) if q.get('id_col') in df.columns if hasattr(df.columns, '__contains__') else "")
+        if st.button("Open by ID", use_container_width=True):
+            params = get_query_params()
+            params.pop("row", None)
+            set_query_params(**{**params, "id": id_val_input, "id_col": id_col_input})
+            st.rerun()
 
-with st.expander("ℹ️ How to connect your Google Sheet"):
-    st.markdown(
-        """
+# Footer/help
+if not LOCKED:
+    with st.expander("ℹ️ How to connect your Google Sheet"):
+        st.markdown(
+            """
+            **Step 1 — Make your Google Sheet public (Viewer)**  
+            Share → General access → *Anyone with the link* → Viewer.
 
-        **Step 1 — Make your Google Sheet public (Viewer)**  
-        Share → General access → *Anyone with the link* → Viewer.
+            **Step 2 — CSV export URL**  
+            Format:  
+            `https://docs.google.com/spreadsheets/d/`**SHEET_ID**`/export?format=csv&gid=`**GID**
 
-        **Step 2 — CSV export URL**  
-        Format:  
-        `https://docs.google.com/spreadsheets/d/`**SHEET_ID**`/export?format=csv&gid=`**GID**
+            **Step 3 — Open with parameters**  
+            - By row number: `?row=10`  
+            - By ID: `?id=ABC123&id_col=PatientID`
+            """
+        )
 
-        **Step 3 — Open with parameters**  
-        - By row number: `?row=10`  
-        - By ID: `?id=ABC123&id_col=PatientID`
-
-        **Tip**  
-        - Header row should be the first row. Avoid merged cells.
-        - For image preview, put a direct image URL in a column.
-        """
-    )
-
-st.caption("URL navigation supports ?sheet=, ?row=, ?id= & ?id_col= • Cached 5 minutes")
+st.caption(("🔒 Locked view" if LOCKED else "URL navigation supports ?sheet=, ?row=, ?id= & ?id_col=") + " • Cached 5 minutes")
