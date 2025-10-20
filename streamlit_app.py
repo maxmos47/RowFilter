@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 
-st.set_page_config(page_title="Patient Dashboard (GAS • Card UI)", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="Patient Dashboard", page_icon="🩺", layout="centered")
 
 # =========================
 # CONFIG
@@ -102,7 +102,7 @@ def render_kv_grid(df_one_row: pd.DataFrame, title: str = "", cols: int = 2):
 # =========================
 # Main UI
 # =========================
-st.markdown("### 🩺 Patient Dashboard — Selected Row (Card UI)")
+st.markdown("### 🩺 Patient Information")
 
 if not GAS_WEBAPP_URL:
     st.error("Missing GAS web app URL. Add it to secrets as:\n\n[gas]\nwebapp_url = \"https://script.google.com/macros/s/XXX/exec\"")
@@ -138,7 +138,7 @@ current_L = data.get("current_L", "")
 
 # --------- UI based on mode ---------
 if mode == "view":
-    render_kv_grid(df_al, title="Selected Row (A–L)", cols=2)
+    render_kv_grid(df_al, title="Patient", cols=2)
     st.success("Showing refreshed data. Form is hidden in view mode.")
     # Button to get back to edit
     if st.button("Edit this row again"):
@@ -151,7 +151,7 @@ else:
     # Form to update L
     idx = ALLOWED_L.index(current_L) if current_L in ALLOWED_L else 0
     with st.form("update_l_form", border=True):
-        st.markdown("#### Update column **L** (Treatment category)")
+        st.markdown("Primary triage")
         new_L = st.selectbox("Select a value for column L", ALLOWED_L, index=idx, help="Allowed: Minor, Delayed, Immediate, Decreased")
         submitted = st.form_submit_button("Submit")
         if submitted:
