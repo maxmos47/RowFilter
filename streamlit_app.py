@@ -1,14 +1,15 @@
-# Minimal Patient Data Viewer (Mobile-Friendly)
+# Minimal Patient Data Viewer (Mobile-Friendly) — FIXED
 # ------------------------------------------------
 # URL params: ?row=, ?id=&id_col=, optional ?lock=1
 # - In lock mode, sidebar is hidden and sheet override is disabled.
 # - Only a single, large table is shown.
 
-import re, math, json
-from urllib.parse import urlencode
+import json
 import pandas as pd
 import numpy as np
 import streamlit as st
+
+from urllib.parse import urlencode
 
 def get_query_params() -> dict:
     try:
@@ -34,20 +35,21 @@ LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
 
 st.set_page_config(page_title="Patient data", layout="centered", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
 
+hide_css = "" if not LOCKED else '''
+[data-testid='stSidebar'] {display:none !important;}
+[data-testid='collapsedControl'] {display:none !important;}
+'''
 st.markdown(
-    """
+    '''
     <style>
-      /* Hide sidebar in locked mode */
-      %HIDE_SIDEBAR%
-      /* Tighten paddings and enlarge table text for mobile readability */
+      %HIDE%
       .block-container {padding-top: 0.5rem; padding-bottom: 1.25rem; max-width: 1200px;}
       .stDataFrame table {font-size: 1.05rem;}
       .stDataFrame [data-testid="stHorizontalBlock"] {overflow-x: auto;}
-      /* Reduce header top space */
       header[data-testid="stHeader"] {height: 0; visibility: hidden;}
     </style>
-    """.replace("%HIDE_SIDEBAR%", "" if not LOCKED else "[data-testid='stSidebar'] {display:none !important;} [data-testid='collapsedControl'] {display:none !important;}\"),
-    unsafe_allow_html=True
+    '''.replace("%HIDE%", hide_css),
+    unsafe_allow_html=True,
 )
 
 # No big title per requirement, only a small section label
@@ -67,7 +69,7 @@ else:
         gid_val = gid if gid is not None else "0"
         sheet = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid_val}"
 
-# Sidebar only in non-locked mode (but we won't show additional widgets—kept for manual override if needed)
+# Sidebar only in non-locked mode (kept for manual override if needed)
 if not LOCKED:
     with st.sidebar:
         st.caption("Data source (optional override)")
@@ -111,7 +113,7 @@ selected_idx = max(0, min(selected_idx, len(df) - 1))
 
 # --- Show only the table (transpose for readability) ---
 row = df.iloc[selected_idx]
-st.dataframe(row.to_frame().T, use_container_width=True, height=360)
+st.dataframe(row.to_frame().T, use_container_width=True, height=420)
 
-# Optionally, show tiny info (no actions/metrics/navigation)
+# Tiny info (no actions/metrics/navigation)
 st.caption(f"Showing row {selected_idx+1} of {len(df)}")
