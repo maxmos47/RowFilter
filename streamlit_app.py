@@ -1,8 +1,9 @@
-# Minimal Patient Data Viewer (Mobile-Friendly) — FIXED
+# Minimal Patient Data Viewer (Mobile-Friendly) — NOT FOUND HANDLING
 # ------------------------------------------------
 # URL params: ?row=, ?id=&id_col=, optional ?lock=1
 # - In lock mode, sidebar is hidden and sheet override is disabled.
 # - Only a single, large table is shown.
+# - If row is out of range or ID not matched -> show 'ไม่พบข้อมูล' and stop.
 
 import json
 import pandas as pd
@@ -95,21 +96,32 @@ id_value = q.get("id")
 id_col = q.get("id_col")
 
 selected_idx = None
-if id_value and id_col and id_col in df.columns:
+
+if id_value or id_col:
+    # Require both id and id_col
+    if not (id_value and id_col):
+        st.error("❌ ไม่พบข้อมูล: โปรดระบุทั้ง id= และ id_col=")
+        st.stop()
+    if id_col not in df.columns:
+        st.error(f"❌ ไม่พบคอลัมน์ '{id_col}' ในข้อมูล")
+        st.stop()
     matches = df.index[df[id_col].astype(str) == str(id_value)].tolist()
     if matches:
         selected_idx = matches[0]
+    else:
+        st.error("❌ ไม่พบข้อมูลตาม ID ที่ระบุ")
+        st.stop()
 elif row_param is not None:
-    base = max(1, row_param)
-    base = min(base, len(df))
-    selected_idx = base - 1
+    if 1 <= row_param <= len(df):
+        selected_idx = row_param - 1
+    else:
+        st.error(f"❌ ไม่พบข้อมูลในแถวที่ระบุ (row={row_param}) ข้อมูลมีช่วง 1–{len(df)}")
+        st.stop()
 else:
     if LOCKED:
         st.error("Locked mode ต้องระบุพารามิเตอร์ ?row= หรือ ?id= & id_col=")
         st.stop()
     selected_idx = 0
-
-selected_idx = max(0, min(selected_idx, len(df) - 1))
 
 # --- Show only the table (transpose for readability) ---
 row = df.iloc[selected_idx]
