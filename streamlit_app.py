@@ -151,8 +151,8 @@ else:
     # Form to update L
     idx = ALLOWED_L.index(current_L) if current_L in ALLOWED_L else 0
     with st.form("update_l_form", border=True):
-        st.markdown("Primary triage")
-        new_L = st.selectbox("Select a value for column L", ALLOWED_L, index=idx, help="Allowed: Minor, Delayed, Immediate, Decreased")
+        st.markdown("### Primary triage")
+        new_L = st.selectbox("Select a value for triage", ALLOWED_L, index=idx, help="Allowed: Minor, Delayed, Immediate, Decreased")
         submitted = st.form_submit_button("Submit")
         if submitted:
             try:
