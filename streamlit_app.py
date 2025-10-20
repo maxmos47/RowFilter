@@ -165,23 +165,3 @@ else:
                     st.error(f"Update failed: {res}")
             except Exception as e:
                 st.error(f"Failed to update via GAS: {e}")
-
-# Quick row navigation (for convenience)
-with st.expander("Quick row navigation", expanded=False):
-    col1, col2 = st.columns(2)
-    with col1:
-        new_row = st.number_input("Go to row (1-based, data row under header)", min_value=1, max_value=max(1, max_row), value=row, step=1)
-    with col2:
-        if st.button("Go"):
-            set_query_params(row=str(new_row), mode="edit")
-            st.rerun()
-
-# Footer: how URL works
-st.markdown("""
-<small>
-<b>URL:</b> <code>?row=1</code> เลือกแถวข้อมูล (1 = แถวแรกใต้หัวตาราง) •
-<code>&mode=view</code> แสดง A–L ไม่มีฟอร์ม •
-<code>&mode=edit</code> แสดง A–K + ฟอร์ม<br/>
-หลัง Submit จะสวิตช์เป็น <code>mode=view</code> ให้อัตโนมัติ
-</small>
-""", unsafe_allow_html=True)
