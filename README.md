@@ -1,19 +1,12 @@
-# Row-by-Row Dashboard (Streamlit) — Locked Mode Ready
 
-Pre-configured to your Google Sheet:
+# Patient Data — Mobile-First One-Row Viewer
 
-- CSV URL (default):  
-  `https://docs.google.com/spreadsheets/d/1oaQZ6OwxJUti4AIf620Hp_bCjmKwu8AF9jYTv4vs7Hc/export?format=csv&gid=0`
+This Streamlit app displays one row from a Google Sheet as mobile-friendly cards.
 
-## Run locally
-```bash
-pip install -r requirements.txt
-streamlit run streamlit_app.py
-```
+## Usage
+- Normal: `?row=5`
+- Locked: `?row=5&lock=1`
+- By ID: `?id=ABC123&id_col=PatientID&lock=1`
 
-## Shareable URLs
-- Normal (navigable): `?row=5`
-- **Locked single-row**: `?row=5&lock=1`
-- Locked by key: `?id=ABC123&id_col=PatientID&lock=1`
-
-> In locked mode: sidebar & navigation are hidden, and overriding the sheet via `?sheet=` is disabled.
+Default data source:
+https://docs.google.com/spreadsheets/d/1oaQZ6OwxJUti4AIf620Hp_bCjmKwu8AF9jYTv4vs7Hc/export?format=csv&gid=0
