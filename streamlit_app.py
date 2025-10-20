@@ -139,7 +139,7 @@ current_L = data.get("current_L", "")
 # --------- UI based on mode ---------
 if mode == "view":
     render_kv_grid(df_al, title="Patient", cols=2)
-    st.success("Showing refreshed data. Form is hidden in view mode.")
+    st.success("Triage เรียบร้อย")
     # Button to get back to edit
     if st.button("Edit this row again"):
         set_query_params(row=str(row), mode="edit")
