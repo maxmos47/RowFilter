@@ -1,25 +1,22 @@
-# Streamlit Row-by-Row Dashboard with Lock Mode
+# Streamlit Row-by-Row Dashboard with Lock Mode (FIXED)
 # ------------------------------------------------
 # Features:
 # - View one row at a time from a Google Sheet (CSV export)
 # - URL params: ?row=, ?id=&id_col=
-# - NEW: Locked mode via ?lock=1 => hides sidebar & navigation; shows only the specified row
+# - Locked mode via ?lock=1 => hides sidebar & navigation; shows only the specified row
 # - Default dataset = your Google Sheet; override with ?sheet= (disabled in lock mode)
-# - Download selected row as JSON/CSV (optional; kept in both modes)
+# - Download selected row as JSON/CSV
 #
 # Examples:
-#   - Normal view (navigable):             ?row=5
-#   - Locked single-row view (shareable):  ?row=5&lock=1
-#   - Locked by key:                       ?id=ABC123&id_col=PatientID&lock=1
-#
-# Tip: Share your Google Sheet as "Anyone with the link → Viewer"
-
+#   - Normal view:             ?row=5
+#   - Locked single-row:       ?row=5&lock=1
+#   - Locked by key:           ?id=ABC123&id_col=PatientID&lock=1
 
 import io
 import json
 import math
 import re
-from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
+from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
@@ -64,7 +61,7 @@ def load_csv(url: str) -> pd.DataFrame:
     return df
 
 
-# Page config first (we may collapse sidebar if locked)
+# Page config + lock mode
 q_pre = get_query_params()
 LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
 st.set_page_config(page_title="Row Dashboard", layout="wide", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
@@ -73,10 +70,10 @@ st.title("🔎 Row-by-Row Dashboard (Google Sheet)")
 
 q = q_pre
 
-# Default to the user's sheet unless overridden via ?sheet= or ?sheet_id=&gid=
+# Default sheet
 DEFAULT_SHEET = "https://docs.google.com/spreadsheets/d/1oaQZ6OwxJUti4AIf620Hp_bCjmKwu8AF9jYTv4vs7Hc/export?format=csv&gid=0"
 
-# In locked mode, ignore any external sheet overrides for safety
+# In locked mode, ignore override
 if LOCKED:
     sheet = DEFAULT_SHEET
 else:
@@ -89,7 +86,7 @@ if not LOCKED and (not q.get("sheet") and sheet_id):
     gid_val = gid if gid is not None else "0"
     sheet = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid_val}"
 
-# Sidebar: hidden when LOCKED (collapsed + CSS)
+# Sidebar (hidden in locked mode)
 if not LOCKED:
     with st.sidebar:
         st.subheader("Data Source")
@@ -104,16 +101,15 @@ if not LOCKED:
         )
         st.caption("Tip: The app can also open a row by key via ?id= and ?id_col=")
 else:
-    # Hide sidebar toggle completely
+    # Hide sidebar
     st.markdown(
         """
-
         <style>
         [data-testid="stSidebar"] {display: none !important;}
         [data-testid="collapsedControl"] {display: none !important;}
         </style>
-        """
-        , unsafe_allow_html=True
+        """,
+        unsafe_allow_html=True
     )
     csv_url = sheet
 
@@ -161,7 +157,7 @@ with right:
     if id_col and id_col in df.columns:
         st.metric("Key", f"{id_col} = {row.get(id_col)}")
 
-# Navigation controls (hidden in LOCKED mode)
+# Navigation (hidden in LOCKED)
 if not LOCKED:
     c1, c2, c3, c4 = st.columns([1, 1, 2, 3])
     with c1:
@@ -231,8 +227,18 @@ with right_col:
         st.link_button("Go", "?" + urlencode(new_q), use_container_width=True)
 
         st.caption("Find by ID (if your sheet has an ID column)")
-        id_col_input = st.selectbox("ID Column", options=list(df.columns), index=0 if (q.get('id_col') in df.columns if hasattr(df.columns, '__contains__') else False) else 0, key="idcol")
-        id_val_input = st.text_input("ID Value", value=str(row.get(q.get('id_col'))) if q.get('id_col') in df.columns if hasattr(df.columns, '__contains__') else "")
+        cols = list(df.columns)
+        idcol_q = q.get('id_col') or ''
+        default_index = cols.index(idcol_q) if idcol_q in cols else 0
+        id_col_input = st.selectbox("ID Column", options=cols, index=default_index, key="idcol")
+
+        # SAFE default for ID value
+        if q.get("id_col") and q.get("id_col") in df.columns:
+            default_val = str(row.get(q.get("id_col"), ""))
+        else:
+            default_val = ""
+        id_val_input = st.text_input("ID Value", value=default_val)
+
         if st.button("Open by ID", use_container_width=True):
             params = get_query_params()
             params.pop("row", None)
