@@ -1,15 +1,7 @@
+
 import streamlit as st
 import pandas as pd
 import requests
-import time                     # >>> ADD
-from uuid import uuid4         # >>> ADD
-from datetime import datetime, timezone  # >>> ADD
-try:
-    # Python 3.9+ มี zoneinfo
-    from zoneinfo import ZoneInfo        # >>> ADD
-    TZ_BKK = ZoneInfo("Asia/Bangkok")
-except Exception:
-    TZ_BKK = timezone.utc
 
 st.set_page_config(page_title="Patient Dashboard", page_icon="🩺", layout="centered")
 
@@ -60,23 +52,6 @@ def gas_update_L(row: int, value: str) -> dict:
     r = requests.post(GAS_WEBAPP_URL, data=payload, timeout=20)
     r.raise_for_status()
     return r.json()
-
-# >>> ADD: new helper to log events to GAS
-def gas_log_event(**fields) -> dict:
-    payload = {"action": "log"}
-    payload.update({k: "" if v is None else str(v) for k, v in fields.items()})
-    if TOKEN:
-        payload["token"] = TOKEN
-    r = requests.post(GAS_WEBAPP_URL, data=payload, timeout=20)
-    r.raise_for_status()
-    return r.json()
-
-# >>> ADD: time helpers
-def now_iso_bkk():
-    try:
-        return datetime.now(TZ_BKK).isoformat(timespec="seconds")
-    except Exception:
-        return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(timespec="seconds")
 
 # =========================
 # Card UI (mobile-friendly)
@@ -144,31 +119,6 @@ try:
 except ValueError:
     row = 1
 
-# >>> ADD: create/stash a session id & track open-time once
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid4())
-
-log_key = f"open_logged::{row}::{mode}"
-if "start_ts" not in st.session_state:
-    st.session_state.start_ts = time.time()   # seconds since epoch
-    st.session_state.start_iso = now_iso_bkk()
-
-if log_key not in st.session_state:
-    # fire once per (row, mode) on first render
-    try:
-        gas_log_event(
-            session_id=st.session_state.session_id,
-            event="open",
-            row=row,
-            mode=mode,
-            started_at=st.session_state.start_iso,
-            query=str(qp),
-        )
-    except Exception as _e:
-        # ไม่ต้อง stop แอป แค่แจ้งเตือนเบาๆ
-        st.toast("⚠️ Failed to log 'open' event", icon="⚠️")
-    st.session_state[log_key] = True
-
 # Fetch row via GAS
 try:
     data = gas_get_row(row=row)
@@ -207,25 +157,6 @@ else:
         if submitted:
             try:
                 res = gas_update_L(row=row, value=new_L)
-                # >>> ADD: log 'submit' regardless of update result, but include result status
-                submitted_iso = now_iso_bkk()
-                duration_sec = max(0, int(time.time() - st.session_state.start_ts))
-                try:
-                    gas_log_event(
-                        session_id=st.session_state.session_id,
-                        event="submit",
-                        row=row,
-                        mode=mode,
-                        started_at=st.session_state.start_iso,
-                        submitted_at=submitted_iso,
-                        duration_seconds=duration_sec,
-                        current_L=current_L,
-                        new_L=new_L,
-                        update_status=res.get("status", "unknown"),
-                    )
-                except Exception as _e:
-                    st.toast("⚠️ Failed to log 'submit' event", icon="⚠️")
-
                 if res.get("status") == "ok":
                     # After submit -> view mode (no form) and refreshed A–L
                     set_query_params(row=str(row), mode="view")
