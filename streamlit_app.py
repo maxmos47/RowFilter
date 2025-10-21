@@ -152,7 +152,15 @@ st.markdown("### 🩺 Patient Information")
 
 if not GAS_WEBAPP_URL:
     st.error(
-        "Missing GAS web app URL. Add it to secrets as:
+        """Missing GAS web app URL. Add it to secrets as:
+
+[gas]
+webapp_url = "https://script.google.com/macros/s/XXX/exec"
+token = "MY_SHARED_SECRET"
+"""
+    )
+    st.stop()
+
 
 [gas]
 webapp_url = \"https://script.google.com/macros/s/XXX/exec\""
