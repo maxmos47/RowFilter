@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
 import json
 import hmac
 import hashlib
 import base64
 from datetime import datetime, timezone
 from typing import Dict, Any
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Patient Dashboard", page_icon="🩺", layout="centered")
 
@@ -48,7 +48,7 @@ def utc_now_ts() -> int:
 
 
 # ---- Token helpers (HMAC-SHA256, URL-safe) ----
-# Payload example: {"row": 1, "t0": 1730000000, "remaining": 120, "exp": 1730086400}
+# Payload example: {"row": 1, "t0": 1730000000, "origin": 120, "exp": 1730086400}
 # Encoded token format: base64url(json).base64url(signature)
 
 def _b64url(data: bytes) -> str:
@@ -97,13 +97,14 @@ st.markdown(
 .kv-card{border:1px solid #e5e7eb;padding:12px;border-radius:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06);background:#fff;}
 .kv-label{font-size:0.9rem;color:#6b7280;margin-bottom:2px;}
 .kv-value{font-size:1.05rem;font-weight:600;word-break:break-word;}
-.countdown{border:1px dashed #94a3b8;padding:10px;border-radius:12px;display:flex;align-items:center;gap:10px;background:#f8fafc;}
-.badge{font-size:0.75rem;background:#e2e8f0;border-radius:999px;padding:4px 10px;color:#334155;}
-.bignum{font-size:1.6rem;font-weight:700;letter-spacing:0.5px;}
+.countdown{border:1px dashed #94a3b8;padding:12px;border-radius:12px;background:#f8fafc}
+.badge{font-size:0.8rem;background:#e2e8f0;border-radius:999px;padding:4px 10px;color:#334155;margin-right:10px}
+.digits{font-weight:800;letter-spacing:1px;line-height:1}
+.digits.big{font-size:2.8rem}
 @media (max-width: 640px){
   .kv-card{padding:12px;}
   .kv-value{font-size:1.06rem;}
-  .bignum{font-size:1.5rem;}
+  .digits.big{font-size:2.2rem}
 }
 </style>
 """,
@@ -151,7 +152,10 @@ st.markdown("### 🩺 Patient Information")
 
 if not GAS_WEBAPP_URL:
     st.error(
-        "Missing GAS web app URL. Add it to secrets as:\n\n[gas]\nwebapp_url = \"https://script.google.com/macros/s/XXX/exec\""
+        "Missing GAS web app URL. Add it to secrets as:
+
+[gas]
+webapp_url = \"https://script.google.com/macros/s/XXX/exec\""
     )
     st.stop()
 
@@ -187,7 +191,6 @@ if data.get("status") != "ok":
 
 df_ak = pd.DataFrame([data.get("A_K", {})])
 df_al = pd.DataFrame([data.get("A_L", {})])
-# Optional: if backend already returns A_Q
 A_Q = data.get("A_Q", {}) or {}
 
 max_row = data.get("max_rows", 1)
@@ -206,7 +209,6 @@ except Exception:
     timer_from_gsheet = 0
 
 # Session-state countdown that continues locally between reruns
-# We keep the origin seconds, and compute remaining from wall-clock.
 ss_key_state = f"row{row}_timer_state"
 if ss_key_state not in st.session_state or st.session_state[ss_key_state].get("origin") != timer_from_gsheet:
     st.session_state[ss_key_state] = {
@@ -214,26 +216,61 @@ if ss_key_state not in st.session_state or st.session_state[ss_key_state].get("o
         "t0": utc_now_ts(),           # epoch when we latched the origin
     }
 
-# Compute remaining seconds based on elapsed time since t0
 latched = st.session_state[ss_key_state]
 elapsed = max(0, utc_now_ts() - int(latched.get("t0", utc_now_ts())))
 remaining = max(0, int(latched.get("origin", 0)) - elapsed)
+origin_seconds = int(latched.get("origin", 0))
 
-# Auto-refresh every 1s while there is time remaining, else stop refreshing
-autorefresh_ms = 1000 if remaining > 0 else 0
-if autorefresh_ms:
-    st.experimental_set_query_params(**{**qp})  # keep params stable
-    st.autorefresh(interval=autorefresh_ms, key=f"cd_refresh_{row}")
+# --------- Visual countdown (client-side JS to avoid server reruns) ---------
+# Renders big HH:MM:SS digits + HTML progress bar that updates every second.
 
-# Visual countdown widget
-st.markdown(
+def _hms(secs: int) -> str:
+    secs = max(0, int(secs))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+initial_digits = _hms(remaining)
+progress_value = max(0, origin_seconds - remaining)
+progress_max = max(1, origin_seconds if origin_seconds > 0 else 1)
+
+components.html(
     f"""
     <div class=\"countdown\">
       <span class=\"badge\">⏳ Column Q</span>
-      <span class=\"bignum\">{remaining} sec</span>
+      <span id=\"digits\" class=\"digits big\">{initial_digits}</span>
+      <div style=\"margin-top:10px\">
+        <progress id=\"pg\" max=\"{progress_max}\" value=\"{progress_value}\" style=\"width:100%\"></progress>
+      </div>
     </div>
+    <script>
+      (function() {{
+        let remaining = {remaining};
+        const origin = {origin_seconds};
+        const digits = document.getElementById('digits');
+        const pg = document.getElementById('pg');
+        function fmt(n) {{ return String(n).padStart(2,'0'); }}
+        function render() {{
+          let s = Math.max(0, Math.floor(remaining));
+          let h = Math.floor(s/3600);
+          let m = Math.floor((s%3600)/60);
+          let ss = s%60;
+          digits.textContent = `${{fmt(h)}}:${{fmt(m)}}:${{fmt(ss)}}`;
+          if (origin > 0) {{
+            pg.max = origin;
+            pg.value = Math.min(origin, Math.max(0, origin - s));
+          }}
+        }}
+        render();
+        const intv = setInterval(() => {{
+          remaining -= 1;
+          if (remaining <= 0) {{ remaining = 0; render(); clearInterval(intv); return; }}
+          render();
+        }}, 1000);
+      }})();
+    </script>
     """,
-    unsafe_allow_html=True,
+    height=140,
 )
 
 # Prepare a signed token so the secondary triage app can continue the countdown.
@@ -256,15 +293,12 @@ with st.expander("⛳ Hand off timer to Secondary triage app", expanded=True):
 if mode == "view":
     render_kv_grid(df_al, title="Patient", cols=2)
     st.success("Triage เรียบร้อย")
-    # Button to get back to edit
     if st.button("Edit this row again"):
         set_query_params(row=str(row), mode="edit")
         st.rerun()
 else:
-    # Edit mode: show A–K + form
     render_kv_grid(df_ak, title="Patient", cols=2)
 
-    # Form to update L
     idx = ALLOWED_L.index(current_L) if current_L in ALLOWED_L else 0
     with st.form("update_l_form", border=True):
         st.markdown("### Primary triage")
@@ -279,7 +313,6 @@ else:
             try:
                 res = gas_update_L(row=row, value=new_L)
                 if res.get("status") == "ok":
-                    # After submit -> view mode (no form) and refreshed A–L
                     set_query_params(row=str(row), mode="view")
                     st.rerun()
                 else:
