@@ -239,7 +239,7 @@ if raw_q in (None, 0):
     if raw_q in (None, ""):
         raw_q = data.get("current_Q")
 
- timer_from_gsheet = parse_seconds(raw_q)
+timer_from_gsheet = parse_seconds(raw_q)
 
 # Session-state countdown that continues locally between reruns
 ss_key_state = f"row{row}_timer_state"
