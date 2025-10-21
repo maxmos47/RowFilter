@@ -55,11 +55,6 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
-def _b64url_json(obj: Dict[str, Any]) -> str:
-    data = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode()
-    return _b64url(data)
-
-
 def sign_token(payload: Dict[str, Any], secret: str) -> str:
     json_part = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
     key = (secret or "dev-only").encode()
@@ -146,6 +141,44 @@ def render_kv_grid(df_one_row: pd.DataFrame, title: str = "", cols: int = 2):
 
 
 # =========================
+# Timer parsing helpers (handles 90, "02:00", "00:01:30")
+# =========================
+
+def parse_seconds(value) -> int:
+    try:
+        # direct int or float seconds
+        if isinstance(value, (int, float)):
+            # If coming as float but should be integer seconds
+            return max(0, int(round(value)))
+        s = str(value).strip()
+        if not s:
+            return 0
+        # pure integer string
+        if s.isdigit():
+            return max(0, int(s))
+        # hh:mm:ss or mm:ss
+        parts = s.split(":")
+        if len(parts) == 2:
+            m, sec = parts
+            if m.isdigit() and sec.isdigit():
+                return max(0, int(m) * 60 + int(sec))
+        elif len(parts) == 3:
+            h, m, sec = parts
+            if h.isdigit() and m.isdigit() and sec.isdigit():
+                return max(0, int(h) * 3600 + int(m) * 60 + int(sec))
+    except Exception:
+        pass
+    return 0
+
+
+def fmt_hms(secs: int) -> str:
+    secs = max(0, int(secs))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+# =========================
 # Main UI
 # =========================
 st.markdown("### 🩺 Patient Information")
@@ -160,7 +193,6 @@ token = "MY_SHARED_SECRET"
 """
     )
     st.stop()
-
 
 qp = get_query_params()
 row_str = qp.get("row", "1")
@@ -187,9 +219,9 @@ if data.get("status") != "ok":
 # Build DataFrames from GAS response
 # Expecting the backend to include A–K (summary view) and A–L (detailed)
 # For timer in column Q, the backend may expose one of these keys:
-#   - "current_Q" (string/integer seconds)
 #   - "timer_seconds" (integer seconds)
 #   - an object "A_Q" with key "Q" (string/integer seconds)
+#   - "current_Q" (string/integer seconds)
 # The code below is defensive and supports all three.
 
 df_ak = pd.DataFrame([data.get("A_K", {})])
@@ -200,16 +232,14 @@ max_row = data.get("max_rows", 1)
 current_L = data.get("current_L", "")
 
 # --------- TIMER from Column Q (seconds) ---------
-raw_q = (
-    A_Q.get("Q")
-    or data.get("current_Q")
-    or data.get("timer_seconds")
-)
+# Prefer parsed integer from backend; if absent, parse locally (supports hh:mm:ss & mm:ss)
+raw_q = data.get("timer_seconds")
+if raw_q in (None, 0):
+    raw_q = A_Q.get("Q") if "Q" in A_Q else (next(iter(A_Q.values()), None) if isinstance(A_Q, dict) else None)
+    if raw_q in (None, ""):
+        raw_q = data.get("current_Q")
 
-try:
-    timer_from_gsheet = int(str(raw_q).strip()) if raw_q is not None and str(raw_q).strip() != "" else 0
-except Exception:
-    timer_from_gsheet = 0
+ timer_from_gsheet = parse_seconds(raw_q)
 
 # Session-state countdown that continues locally between reruns
 ss_key_state = f"row{row}_timer_state"
@@ -225,15 +255,7 @@ remaining = max(0, int(latched.get("origin", 0)) - elapsed)
 origin_seconds = int(latched.get("origin", 0))
 
 # --------- Visual countdown (client-side JS to avoid server reruns) ---------
-# Renders big HH:MM:SS digits + HTML progress bar that updates every second.
-
-def _hms(secs: int) -> str:
-    secs = max(0, int(secs))
-    h, rem = divmod(secs, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-initial_digits = _hms(remaining)
+initial_digits = fmt_hms(remaining)
 progress_value = max(0, origin_seconds - remaining)
 progress_max = max(1, origin_seconds if origin_seconds > 0 else 1)
 
@@ -259,7 +281,7 @@ components.html(
           let m = Math.floor((s%3600)/60);
           let ss = s%60;
           digits.textContent = `${{fmt(h)}}:${{fmt(m)}}:${{fmt(ss)}}`;
-          if (origin > 0) {{
+          if (origin > 0 && pg) {{
             pg.max = origin;
             pg.value = Math.min(origin, Math.max(0, origin - s));
           }}
@@ -276,8 +298,14 @@ components.html(
     height=140,
 )
 
+# If parsing yields 0 but backend had a non-empty string, warn user for data format
+if timer_from_gsheet == 0:
+    raw_preview = "" if raw_q is None else str(raw_q)
+    st.info(
+        f"Timer from column Q is 0 sec. Raw value read: '{raw_preview}'. Supported formats: seconds (e.g., 120), mm:ss (e.g., 02:00), or hh:mm:ss (e.g., 00:02:00)."
+    )
+
 # Prepare a signed token so the secondary triage app can continue the countdown.
-# Token includes latched origin seconds and t0, plus an expiry (24h by default).
 exp = utc_now_ts() + 24 * 3600
 payload = {"row": row, "origin": int(latched["origin"]), "t0": int(latched["t0"]), "exp": exp}
 countdown_token = sign_token(payload, TOKEN)
