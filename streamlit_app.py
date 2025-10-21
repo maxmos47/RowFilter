@@ -162,11 +162,6 @@ token = "MY_SHARED_SECRET"
     st.stop()
 
 
-[gas]
-webapp_url = \"https://script.google.com/macros/s/XXX/exec\""
-    )
-    st.stop()
-
 qp = get_query_params()
 row_str = qp.get("row", "1")
 mode = qp.get("mode", "edit")  # "edit" or "view"
